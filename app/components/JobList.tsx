@@ -31,7 +31,9 @@ function JobCard({ job, onDelete, onAnalyze, onLeRobot, onRetry }: {
   const totalSize = job.files.reduce((sum, file) => sum + file.size, 0);
   const busy = job.status === "queued" || job.status === "processing";
   const videoResults = job.results.filter((result) => !result.analysis_only && result.view_url && result.download_url);
-  const firstResult = job.results.find((result) => result.analysis);
+  const analysisResults = [...new Map(
+    job.results.filter((result) => result.analysis).map((result) => [result.source, result]),
+  ).values()];
   const failures = jobFailureDetails(job);
   return <article className="job-card">
     <div className="job-summary">
@@ -51,13 +53,13 @@ function JobCard({ job, onDelete, onAnalyze, onLeRobot, onRetry }: {
     <div className="job-message"><span>{job.message}</span><span>成功 {job.succeeded_count} · 失败 {job.failed_count}</span><strong>{job.progress}%</strong></div>
     {busy ? <div className="processing-state"><span className="spinner" /><div><strong>Processing pipeline</strong><p>任务正在本地 Agent 中运行，结果会自动刷新。</p></div></div> : <>
       <nav className="result-tabs" aria-label="任务结果">
-        <button className={tab === "analysis" ? "active" : ""} onClick={() => setTab("analysis")}>分析概览 <span>{job.results.filter((r) => r.analysis).length}</span></button>
+        <button className={tab === "analysis" ? "active" : ""} onClick={() => setTab("analysis")}>分析概览 <span>{analysisResults.length}</span></button>
         <button className={tab === "video" ? "active" : ""} onClick={() => setTab("video")}>视频预览 <span>{videoResults.length}</span></button>
         <button className={tab === "metrics" ? "active" : ""} onClick={() => setTab("metrics")}>详细指标 <span>{job.results.reduce((sum, r) => sum + (r.analysis?.metrics.length || 0), 0)}</span></button>
         <button className={tab === "dataset" ? "active" : ""} onClick={() => setTab("dataset")}>LeRobot <span>{job.lerobot_results?.length || 0}</span></button>
       </nav>
       <div className="tab-content">
-        {tab === "analysis" && (firstResult ? <AnalysisDashboard result={firstResult} /> : <div className="failure-details"><strong>{job.status === "failed" ? "任务未生成可展示的视频结果" : "等待分析结果"}</strong>{failures.map((message, index) => <p key={`${message}-${index}`}>{message}</p>)}</div>)}
+        {tab === "analysis" && (analysisResults.length ? <AnalysisDashboard results={analysisResults} /> : <div className="failure-details"><strong>{job.status === "failed" ? "任务未生成可展示的分析结果" : "等待分析结果"}</strong>{failures.map((message, index) => <p key={`${message}-${index}`}>{message}</p>)}</div>)}
         {tab === "video" && <VideoGallery results={videoResults} />}
         {tab === "metrics" && <DetailedMetrics results={job.results} />}
         {tab === "dataset" && <DatasetGallery job={job} />}
