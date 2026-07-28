@@ -2,17 +2,17 @@
 
 import { AgentStatus } from "./AgentStatus";
 
-export function Header({ connected }: { connected: boolean | null }) {
+export function Header({ connected, message }: { connected: boolean | null; message?: string }) {
   return (
     <header className="app-header">
       <div className="brand">
         <span className="brand-mark" aria-hidden="true"><i /><i /><i /></span>
         <div>
-          <strong>MCAP Data Processing Platform</strong>
-          <span>Data Intelligence Workspace</span>
+          <strong>MCAP 数据处理工作台</strong>
+          <span>MCAP Data Processing Workspace</span>
         </div>
       </div>
-      <AgentStatus connected={connected} />
+      <AgentStatus connected={connected} message={message} />
     </header>
   );
 }

@@ -4,7 +4,8 @@ import { ChangeEvent, DragEvent, useCallback, useEffect, useMemo, useRef, useSta
 import { Header } from "./components/Header";
 import { JobList } from "./components/JobList";
 import { UploadCard } from "./components/UploadCard";
-import { agentUrl, checkAgent, requestAgent } from "./lib/agent";
+import { agentUrl, inspectAgent, requestAgent } from "./lib/agent";
+import { normalizeJobs } from "./lib/jobAdapter";
 import type { Job, UploadFileItem } from "./types";
 
 function makeKey(file: File) {
@@ -24,25 +25,34 @@ export default function Home() {
   const [lerobotFps, setLeRobotFps] = useState("12");
   const [error, setError] = useState("");
   const [backendReady, setBackendReady] = useState<boolean | null>(null);
+  const [agentMessage, setAgentMessage] = useState("正在连接本地 Agent");
 
   const selectedBytes = useMemo(() => selected.reduce((total, item) => total + item.file.size, 0), [selected]);
 
   const refreshJobs = useCallback(async () => {
     try {
-      const [ready, response] = await Promise.all([checkAgent(), requestAgent("/api/jobs")]);
-      if (!ready || !response.ok) throw new Error("Local Agent unavailable");
+      const diagnostic = await inspectAgent();
+      setAgentMessage(diagnostic.message);
+      if (!diagnostic.connected) {
+        setBackendReady(false);
+        return;
+      }
+      const response = await requestAgent("/api/jobs");
+      if (!response.ok) throw new Error(`任务接口返回异常（HTTP ${response.status}）`);
       setBackendReady(true);
-      setJobs(await response.json());
-    } catch {
+      setJobs(normalizeJobs(await response.json()));
+    } catch (reason) {
       setBackendReady(false);
+      setAgentMessage(reason instanceof Error ? reason.message : "任务接口返回异常");
     }
   }, []);
 
   useEffect(() => {
     const initial = window.setTimeout(() => void refreshJobs(), 0);
-    const timer = window.setInterval(refreshJobs, 1500);
+    const hasActiveJob = jobs.some((job) => job.status === "queued" || job.status === "processing");
+    const timer = window.setInterval(refreshJobs, hasActiveJob ? 1500 : 10000);
     return () => { window.clearTimeout(initial); window.clearInterval(timer); };
-  }, [refreshJobs]);
+  }, [jobs, refreshJobs]);
 
   const addFiles = useCallback((incoming: File[]) => {
     const valid = incoming.filter((file) => file.name.toLowerCase().endsWith(".mcap"));
@@ -123,22 +133,24 @@ export default function Home() {
 
   return (
     <main className="app-shell">
-      <Header connected={backendReady} />
+      <Header connected={backendReady} message={agentMessage} />
       <div className="app-scroll">
         <section className="workspace-intro">
-          <div><span>LOCAL DATA OPERATIONS</span><h1>Data Processing Workspace</h1><p>MCAP 视频提取、数据质量检测与机器人训练数据生成。</p></div>
-          <div className="workspace-stats"><div><strong>{jobs.length}</strong><span>TOTAL JOBS</span></div><div><strong>{jobs.filter((job) => job.status === "processing").length}</strong><span>PROCESSING</span></div><div><strong>{jobs.reduce((sum, job) => sum + job.results.length, 0)}</strong><span>OUTPUTS</span></div></div>
+          <div><span>MCAP Data Processing Workspace</span><h1>数据处理工作区</h1><p>视频导出 · 质量检测 · LeRobot 数据集</p></div>
+          <div className="workspace-stats"><div><strong>{jobs.length}</strong><span>任务总数</span></div><div><strong>{jobs.filter((job) => job.status === "processing").length}</strong><span>处理中</span></div><div><strong>{jobs.reduce((sum, job) => sum + job.results.filter((result) => !result.analysis_only).length, 0)}</strong><span>视频结果</span></div></div>
         </section>
         <UploadCard inputRef={inputRef} selected={selected} selectedBytes={selectedBytes} dragging={dragging} uploading={uploading}
           uploadProgress={uploadProgress} connected={backendReady} error={error} ratio={ratio} includeLeRobot={includeLeRobot}
+          agentMessage={agentMessage}
           lerobotFps={lerobotFps} onChoose={onChoose} onDrop={onDrop} onDragging={setDragging} onClear={() => setSelected([])}
           onRemove={(key) => setSelected((current) => current.filter((item) => item.key !== key))} onRatio={setRatio}
           onLeRobot={setIncludeLeRobot} onLeRobotFps={setLeRobotFps} onUpload={() => void uploadFiles(selected.map((item) => item.file))} />
         <JobList jobs={jobs} connected={backendReady}
           onDelete={(id) => void runAction(`/api/jobs/${id}`, "删除任务失败", { method: "DELETE" })}
           onAnalyze={(id) => void runAction(`/api/jobs/${id}/analyze`, "检测运行失败")}
+          onRetry={(id) => void runAction(`/api/jobs/${id}/retry`, "任务重试失败")}
           onLeRobot={createLeRobot} />
-        <footer><span>MCAP Data Processing Platform</span><p>All files and results remain on your local machine.</p></footer>
+        <footer><span>MCAP 数据处理工作台</span><p>视频、分析报告和 LeRobot 数据集均保存在本机。</p></footer>
       </div>
     </main>
   );

@@ -13,7 +13,7 @@ export function formatDate(value?: string) {
 }
 
 export function statusLabel(status: Job["status"]) {
-  return { queued: "WAITING", processing: "PROCESSING", completed: "SUCCESS", failed: "FAILED" }[status];
+  return { queued: "等待", processing: "处理中", completed: "已完成", failed: "失败" }[status];
 }
 
 export function elapsedTime(createdAt: string, completedAt?: string) {

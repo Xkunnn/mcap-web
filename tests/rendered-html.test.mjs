@@ -9,8 +9,9 @@ test("static export contains the MCAP batch console", async () => {
   );
   assert.match(html, /<title>MCAP 数据处理工作台<\/title>/i);
   assert.match(html, /拖入一个或多个 .mcap 文件/);
-  assert.match(html, /Connecting to Local Agent/);
-  assert.match(html, /MCAP Data Processing Platform/);
-  assert.match(html, /Jobs &amp; Analysis/);
+  assert.match(html, /正在连接本地 Agent/);
+  assert.match(html, /MCAP 数据处理工作台/);
+  assert.match(html, /处理任务与分析结果/);
+  assert.match(html, /视频导出 · 质量检测 · LeRobot 数据集/);
   assert.doesNotMatch(html, /Your site is taking shape|react-loading-skeleton/);
 });

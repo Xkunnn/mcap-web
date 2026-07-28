@@ -1,12 +1,12 @@
-export function AgentStatus({ connected }: { connected: boolean | null }) {
+export function AgentStatus({ connected, message }: { connected: boolean | null; message?: string }) {
   const state = connected === null ? "checking" : connected ? "online" : "offline";
   const label = connected === null
-    ? "Connecting to Local Agent"
+    ? "正在连接本地 Agent"
     : connected
-      ? "Local Agent Connected"
-      : "Agent Offline";
+      ? "本地 Agent 已连接"
+      : "本地 Agent 未启动";
   return (
-    <div className={`agent-status ${state}`} title={connected === false ? "请启动本地 MCAP Agent" : undefined}>
+    <div className={`agent-status ${state}`} title={message || undefined}>
       <span className="status-dot" />
       <span>{label}</span>
     </div>

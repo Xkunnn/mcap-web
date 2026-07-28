@@ -1,9 +1,11 @@
 import type { AnalysisMetric, TopicCandidate } from "../types";
 
 const groups = [
-  { name: "Camera", match: /camera|rgb|frame|codec|resolution|分辨率|帧/i },
-  { name: "IMU", match: /imu|gyro|accel|惯性|陀螺|加速度/i },
+  { name: "RGB / Camera", match: /camera|rgb/i },
+  { name: "Gray", match: /gray|grey|灰度/i },
   { name: "Depth", match: /depth|深度/i },
+  { name: "IMU", match: /imu|gyro|accel|惯性|陀螺|加速度/i },
+  { name: "时间与帧诊断", match: /time|timestamp|interval|drop|frame|duration|时间|时长|间隔|丢帧|帧/i },
 ];
 
 function MetricRows({ metrics }: { metrics: AnalysisMetric[] }) {
@@ -36,8 +38,8 @@ export function AnalysisAccordion({ metrics, topics }: { metrics: AnalysisMetric
   const other = metrics.filter((metric) => !claimed.has(metric));
   return (
     <div className="accordion-stack">
-      {sections.map((section, index) => (
-        <details className="accordion" key={section.name} open={index === 0}>
+      {sections.map((section) => (
+        <details className="accordion" key={section.name}>
           <summary><span className={`stream-dot stream-${section.name.toLowerCase()}`} /><strong>{section.name}</strong><span>{section.items.length} metrics</span><i>⌄</i></summary>
           {section.items.length ? <MetricRows metrics={section.items} /> : <p className="accordion-empty">未识别到此类数据指标</p>}
         </details>

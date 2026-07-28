@@ -70,6 +70,7 @@ export type ResultItem = {
   download_url: string;
   report_url: string;
   analysis?: McapAnalysis;
+  analysis_only?: boolean;
 };
 
 export type LeRobotResult = {
@@ -94,7 +95,9 @@ export type Job = {
   status: "queued" | "processing" | "completed" | "failed";
   progress: number;
   created_at: string;
-  completed_at?: string;
+  updated_at?: string;
+  started_at?: string;
+  finished_at?: string;
   file_count: number;
   files: { name: string; size: number }[];
   message: string;
@@ -106,4 +109,7 @@ export type Job = {
   lerobot_errors?: { source: string; error: string }[];
   succeeded_count: number;
   failed_count: number;
+  return_code?: number;
+  pending_operation?: string;
+  error?: string;
 };
