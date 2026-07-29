@@ -96,24 +96,31 @@ function lerobotSummary(files: NormalizedFileResult[]): string {
   ].filter(Boolean).join(" · ");
 }
 
-function JobCard({ job, onDelete, onAnalyze, onLeRobot, onRetry }: {
-  job: Job; onDelete: (id: string) => void; onAnalyze: (id: string) => void; onLeRobot: (id: string) => void; onRetry: (id: string) => void;
+function JobCard({ job, expanded, onToggle, onDelete, onAnalyze, onLeRobot, onRetry }: {
+  job: Job; expanded: boolean; onToggle: () => void;
+  onDelete: (id: string) => void; onAnalyze: (id: string) => void; onLeRobot: (id: string) => void; onRetry: (id: string) => void;
 }) {
   const [tab, setTab] = useState<Tab>("analysis");
   const [filesExpanded, setFilesExpanded] = useState(false);
   const busy = job.status === "queued" || job.status === "processing";
   const fileResults = normalizeFileResults(job);
+  const totalSize = job.files.reduce((sum, file) => sum + file.size, 0);
   const displayStatus = getJobDisplayStatus(job);
   const lerobotUnsupported = isJobLerobotUnsupported(job);
   const videoResults = job.results.filter((result) => !result.analysis_only && result.view_url && result.download_url);
   const analysisResults = [...new Map(
     job.results.filter((result) => result.analysis).map((result) => [result.source, result]),
   ).values()];
+  const qualityCounts = analysisResults.reduce((counts, result) => {
+    (["PASS", "CHECK", "FAIL"] as const).forEach((key) => { counts[key] += Number(result.analysis?.counts?.[key] || 0); });
+    return counts;
+  }, { PASS: 0, CHECK: 0, FAIL: 0 });
+  const qualityStatus = qualityCounts.FAIL ? "FAIL" : qualityCounts.CHECK ? "CHECK" : qualityCounts.PASS ? "PASS" : "N/A";
   const failures = jobFailureDetails(job);
   return <article className="job-card">
     <div className="job-summary">
       <div className="job-file-icon">MC</div>
-      <div className="job-name"><strong>{getJobDisplayName(job)}</strong><span>{getJobFileSummary(job)}</span></div>
+      <div className="job-name"><strong>{getJobDisplayName(job)}</strong><span>{getJobFileSummary(job)}{job.file_count > 1 ? ` · ${formatBytes(totalSize)}` : ""}</span></div>
       <span className={`job-status status-${displayStatus}`}><i />{statusLabel(displayStatus)}</span>
       <div className="job-time"><span>CREATED</span><strong>{formatDate(job.created_at)}</strong></div>
       <div className="job-time"><span>耗时</span><strong>{elapsedTime(job.started_at || job.created_at, job.finished_at)}</strong></div>
@@ -125,6 +132,7 @@ function JobCard({ job, onDelete, onAnalyze, onLeRobot, onRetry }: {
           onClick={() => onLeRobot(job.id)}
         >{lerobotUnsupported ? "不支持 LeRobot" : "生成 LeRobot"}</button>
         <button disabled={busy || displayStatus !== "failed"} onClick={() => onRetry(job.id)}>重试</button>
+        <button className="result-toggle" onClick={onToggle}>{expanded ? "收起结果" : "查看结果"}</button>
         <button disabled={busy} className="danger" onClick={() => onDelete(job.id)}>删除</button>
       </div>
     </div>
@@ -134,10 +142,11 @@ function JobCard({ job, onDelete, onAnalyze, onLeRobot, onRetry }: {
       <span>视频导出：<strong>{stageSummary(fileResults, "videoStatus")}</strong></span>
       <span>质量分析：<strong>{stageSummary(fileResults, "analysisStatus")}</strong></span>
       <span>LeRobot：<strong>{lerobotSummary(fileResults)}</strong></span>
-      {job.file_count > 1 && <button onClick={() => setFilesExpanded((value) => !value)}>{filesExpanded ? "收起文件列表" : "查看全部文件"}</button>}
+      <span>综合质量：<strong className={`quality-text quality-${qualityStatus.toLowerCase().replace("/", "")}`}>{qualityStatus}</strong></span>
+      {expanded && job.file_count > 1 && <button onClick={() => setFilesExpanded((value) => !value)}>{filesExpanded ? "收起文件列表" : "查看全部文件"}</button>}
     </div>
-    {filesExpanded && <FileResultList files={fileResults} />}
-    {busy ? <div className="processing-state"><span className="spinner" /><div><strong>Processing pipeline</strong><p>任务正在本地 Agent 中运行，结果会自动刷新。</p></div></div> : <>
+    {expanded && filesExpanded && <FileResultList files={fileResults} />}
+    {expanded && (busy ? <div className="processing-state"><span className="spinner" /><div><strong>Processing pipeline</strong><p>任务正在本地 Agent 中运行，结果会自动刷新。</p></div></div> : <>
       <nav className="result-tabs" aria-label="任务结果">
         <button className={tab === "analysis" ? "active" : ""} onClick={() => setTab("analysis")}>分析概览 <span>{analysisResults.length}</span></button>
         <button className={tab === "video" ? "active" : ""} onClick={() => setTab("video")}>视频预览 <span>{videoResults.length}</span></button>
@@ -150,7 +159,7 @@ function JobCard({ job, onDelete, onAnalyze, onLeRobot, onRetry }: {
         {tab === "metrics" && <DetailedMetrics results={job.results} />}
         {tab === "dataset" && <DatasetGallery job={job} />}
       </div>
-    </>}
+    </>)}
   </article>;
 }
 
@@ -159,10 +168,26 @@ export function JobList({ jobs, connected, onDelete, onAnalyze, onLeRobot, onRet
   onDelete: (id: string) => void; onAnalyze: (id: string) => void; onLeRobot: (id: string) => void;
   onRetry: (id: string) => void;
 }) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [showAllRecent, setShowAllRecent] = useState(false);
+  const activeJobs = jobs.filter((job) => job.status === "queued" || job.status === "processing");
+  const recentJobs = jobs
+    .filter((job) => job.status !== "queued" && job.status !== "processing")
+    .sort((a, b) => new Date(b.finished_at || b.updated_at || b.created_at).getTime() - new Date(a.finished_at || a.updated_at || a.created_at).getTime());
+  const visibleJobs = [...activeJobs, ...(showAllRecent ? recentJobs : recentJobs.slice(0, 5))];
   return <section className="jobs-section">
     <div className="section-heading"><div><span>任务队列</span><h2>处理任务与分析结果</h2><p>管理本地处理任务并查看数据质量。</p></div><div className="job-count"><strong>{jobs.length}</strong><span>任务总数</span></div></div>
     {connected === false && jobs.length === 0 ? <div className="empty-state offline"><span>!</span><strong>无法读取任务列表</strong><p>请启动本地 MCAP Agent，连接成功后任务会自动显示。</p></div>
       : jobs.length === 0 ? <div className="empty-state"><span>◇</span><strong>No jobs yet</strong><p>上传 MCAP 文件，开始第一条数据处理 Pipeline。</p></div>
-      : <div className="job-list">{connected === false && <div className="stale-data-notice">Agent 暂时离线，以下为上次成功读取的数据。</div>}{jobs.map((job) => <JobCard key={job.id} job={job} onDelete={onDelete} onAnalyze={onAnalyze} onLeRobot={onLeRobot} onRetry={onRetry} />)}</div>}
+      : <div className="job-list">{connected === false && <div className="stale-data-notice">Agent 暂时离线，以下为上次成功读取的数据，不代表实时状态。</div>}{visibleJobs.map((job) => <JobCard
+        key={job.id}
+        job={job}
+        expanded={expandedId === job.id}
+        onToggle={() => setExpandedId((current) => current === job.id ? null : job.id)}
+        onDelete={onDelete}
+        onAnalyze={onAnalyze}
+        onLeRobot={onLeRobot}
+        onRetry={onRetry}
+      />)}{recentJobs.length > 5 && <button className="show-recent-button" onClick={() => setShowAllRecent((value) => !value)}>{showAllRecent ? "收起最近任务" : `查看全部最近任务（${recentJobs.length}）`}</button>}</div>}
   </section>;
 }

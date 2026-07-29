@@ -7,7 +7,7 @@ import { formatBytes } from "../utils";
 export function UploadCard({
   inputRef, selected, selectedBytes, dragging, uploading, uploadProgress, connected, error,
   ratio, includeLeRobot, lerobotFps, agentMessage, onChoose, onDrop, onDragging, onClear, onRemove,
-  onRatio, onLeRobot, onLeRobotFps, onUpload,
+  onRatio, onLeRobot, onLeRobotFps, onResetSettings, onUpload,
 }: {
   inputRef: RefObject<HTMLInputElement | null>; selected: UploadFileItem[]; selectedBytes: number;
   dragging: boolean; uploading: boolean; uploadProgress: number; connected: boolean | null; error: string;
@@ -16,7 +16,7 @@ export function UploadCard({
   onChoose: (e: ChangeEvent<HTMLInputElement>) => void; onDrop: (e: DragEvent<HTMLDivElement>) => void;
   onDragging: (value: boolean) => void; onClear: () => void; onRemove: (key: string) => void;
   onRatio: (value: string) => void; onLeRobot: (value: boolean) => void; onLeRobotFps: (value: string) => void;
-  onUpload: () => void;
+  onResetSettings: () => void; onUpload: () => void;
 }) {
   return (
     <section className="workspace-card upload-card">
@@ -37,11 +37,12 @@ export function UploadCard({
         <div className="selected-scroll">{selected.map(({ file, key }) => <div key={key}><span>MCAP</span><p><strong>{file.name}</strong><small>{formatBytes(file.size)}</small></p><button onClick={() => onRemove(key)} aria-label={`移除 ${file.name}`}>×</button></div>)}</div>
       </div>}
       <div className="pipeline-options">
-        <label><span>Minimum completeness</span><input value={ratio} onChange={(e) => onRatio(e.target.value)} inputMode="decimal" /></label>
-        <label className="switch-row"><input type="checkbox" checked={includeLeRobot} onChange={(e) => onLeRobot(e.target.checked)} /><span className="switch" /><div><strong>LeRobot V3.0</strong><small>Generate training dataset</small></div></label>
-        {includeLeRobot && <label><span>LeRobot FPS</span><input value={lerobotFps} onChange={(e) => onLeRobotFps(e.target.value)} inputMode="decimal" /></label>}
+        <label><span>Minimum completeness · {Math.round((Number(ratio) || 0) * 100)}%</span><input value={ratio} onChange={(e) => onRatio(e.target.value)} inputMode="decimal" /><small>要求视频帧全部成功解码。若原始 MCAP 存在损坏帧或解码失败，任务可能无法通过。需要提高兼容性时可调整为 99%。</small></label>
+        <label className="switch-row"><input type="checkbox" checked={includeLeRobot} onChange={(e) => onLeRobot(e.target.checked)} /><span className="switch" /><div><strong>LeRobot V3.0</strong><small>默认生成 LeRobot 训练数据集</small><em>仅包含受支持 LivUMI Ego 主相机数据的 MCAP 文件可以生成 LeRobot 数据集。不兼容文件仍可完成视频导出和质量检测。</em></div></label>
+        <label><span>LeRobot FPS</span><input disabled={!includeLeRobot} value={lerobotFps} onChange={(e) => onLeRobotFps(e.target.value)} inputMode="decimal" min="1" max="30" /><small>{includeLeRobot ? "当前使用允许的最高默认值 30 FPS。" : "已关闭训练数据集生成，不影响视频导出和质量分析。"}</small></label>
         <button className="primary-button" disabled={!selected.length || uploading || !connected} onClick={onUpload}>{uploading ? `Uploading ${uploadProgress}%` : `Start Processing${selected.length ? ` · ${selected.length}` : ""}`}</button>
       </div>
+      <button className="settings-reset-button" onClick={onResetSettings}>恢复最高质量默认设置</button>
       {uploading && <div className="progress"><span style={{ width: `${uploadProgress}%` }} /></div>}
       {error && <div className="error-banner" role="alert"><strong>Request failed</strong><span>{error}</span></div>}
     </section>

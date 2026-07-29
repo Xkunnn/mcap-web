@@ -2,10 +2,27 @@
 
 import { ChangeEvent, DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Header } from "./components/Header";
+import { HistoryView } from "./components/HistoryView";
 import { JobList } from "./components/JobList";
 import { UploadCard } from "./components/UploadCard";
+import { WorkspaceTabs, type WorkspaceView } from "./components/WorkspaceTabs";
 import { agentUrl, inspectAgent, requestAgent } from "./lib/agent";
+import {
+  clearHistory,
+  createHistoryRecord,
+  loadHistory,
+  mergeHistoryRecords,
+  partitionCurrentAndHistory,
+  saveHistory,
+  type HistoryRecord,
+} from "./lib/historyManager";
 import { normalizeJobs } from "./lib/jobAdapter";
+import {
+  appendUploadSettings,
+  HIGHEST_QUALITY_DEFAULTS,
+  loadUploadSettings,
+  saveUploadSettings,
+} from "./lib/uploadSettings";
 import type { Job, UploadFileItem } from "./types";
 
 function makeKey(file: File) {
@@ -15,19 +32,57 @@ function makeKey(file: File) {
 export default function Home() {
   const inputRef = useRef<HTMLInputElement>(null);
   const uploadingRef = useRef(false);
+  const settingsLoadedRef = useRef(false);
+  const clearedHistoryIdsRef = useRef<Set<string>>(new Set());
   const [selected, setSelected] = useState<UploadFileItem[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [historyRecords, setHistoryRecords] = useState<HistoryRecord[]>([]);
+  const [view, setView] = useState<WorkspaceView>("current");
+  const [archiveNow, setArchiveNow] = useState(() => Date.now());
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
-  const [ratio, setRatio] = useState("0.90");
-  const [includeLeRobot, setIncludeLeRobot] = useState(false);
-  const [lerobotFps, setLeRobotFps] = useState("12");
+  const [ratio, setRatio] = useState(HIGHEST_QUALITY_DEFAULTS.minDecodeRatio);
+  const [includeLeRobot, setIncludeLeRobot] = useState(HIGHEST_QUALITY_DEFAULTS.createLerobot);
+  const [lerobotFps, setLeRobotFps] = useState(HIGHEST_QUALITY_DEFAULTS.lerobotFps);
   const [error, setError] = useState("");
   const [backendReady, setBackendReady] = useState<boolean | null>(null);
   const [agentMessage, setAgentMessage] = useState("正在连接本地 Agent");
 
   const selectedBytes = useMemo(() => selected.reduce((total, item) => total + item.file.size, 0), [selected]);
+  const partitionedJobs = useMemo(() => partitionCurrentAndHistory(jobs, archiveNow), [jobs, archiveNow]);
+  const currentJobs = partitionedJobs.current;
+
+  const syncHistory = useCallback((sourceJobs: Job[], now: number) => {
+    const incoming = partitionCurrentAndHistory(sourceJobs, now).archived
+      .filter((job) => !clearedHistoryIdsRef.current.has(job.id))
+      .map(createHistoryRecord);
+    setHistoryRecords((existing) => {
+      const merged = mergeHistoryRecords(existing, incoming);
+      return saveHistory(window.localStorage, merged, now);
+    });
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const settings = loadUploadSettings(window.localStorage);
+      setRatio(settings.minDecodeRatio);
+      setIncludeLeRobot(settings.createLerobot);
+      setLeRobotFps(settings.lerobotFps);
+      setHistoryRecords(loadHistory(window.localStorage));
+      settingsLoadedRef.current = true;
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!settingsLoadedRef.current) return;
+    saveUploadSettings(window.localStorage, {
+      minDecodeRatio: ratio,
+      createLerobot: includeLeRobot,
+      lerobotFps,
+    });
+  }, [ratio, includeLeRobot, lerobotFps]);
 
   const refreshJobs = useCallback(async () => {
     try {
@@ -39,13 +94,17 @@ export default function Home() {
       }
       const response = await requestAgent("/api/jobs");
       if (!response.ok) throw new Error(`任务接口返回异常（HTTP ${response.status}）`);
+      const normalized = normalizeJobs(await response.json());
+      const now = Date.now();
       setBackendReady(true);
-      setJobs(normalizeJobs(await response.json()));
+      setArchiveNow(now);
+      setJobs(normalized);
+      syncHistory(normalized, now);
     } catch (reason) {
       setBackendReady(false);
       setAgentMessage(reason instanceof Error ? reason.message : "任务接口返回异常");
     }
-  }, []);
+  }, [syncHistory]);
 
   useEffect(() => {
     const initial = window.setTimeout(() => void refreshJobs(), 0);
@@ -53,6 +112,15 @@ export default function Home() {
     const timer = window.setInterval(refreshJobs, hasActiveJob ? 1500 : 10000);
     return () => { window.clearTimeout(initial); window.clearInterval(timer); };
   }, [jobs, refreshJobs]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      setArchiveNow(now);
+      syncHistory(jobs, now);
+    }, 5 * 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, [jobs, syncHistory]);
 
   const addFiles = useCallback((incoming: File[]) => {
     const valid = incoming.filter((file) => file.name.toLowerCase().endsWith(".mcap"));
@@ -82,12 +150,14 @@ export default function Home() {
     if (!batch.length || uploadingRef.current) return;
     if (!backendReady) return setError("请启动 MCAP Agent（运行 mcap-agent/start_agent.sh）");
     if (!Number.isFinite(numericRatio) || numericRatio < 0 || numericRatio > 1) return setError("最低数据完整率必须在 0 到 1 之间");
-    if (includeLeRobot && (!Number.isFinite(numericFps) || numericFps < 1 || numericFps > 60)) return setError("LeRobot FPS 必须在 1 到 60 之间");
+    if (includeLeRobot && (!Number.isFinite(numericFps) || numericFps < 1 || numericFps > 30)) return setError("LeRobot FPS 必须在 1 到 30 之间");
     const data = new FormData();
     batch.forEach((file) => data.append("files", file));
-    data.append("min_decode_ratio", String(numericRatio));
-    data.append("create_lerobot", String(includeLeRobot));
-    data.append("lerobot_fps", lerobotFps);
+    appendUploadSettings(data, {
+      minDecodeRatio: ratio,
+      createLerobot: includeLeRobot,
+      lerobotFps,
+    });
     const request = new XMLHttpRequest();
     request.open("POST", agentUrl("/api/jobs"));
     uploadingRef.current = true;
@@ -127,8 +197,20 @@ export default function Home() {
 
   function createLeRobot(id: string) {
     const fps = Number(lerobotFps);
-    if (!Number.isFinite(fps) || fps < 1 || fps > 60) return setError("LeRobot FPS 必须在 1 到 60 之间");
+    if (!Number.isFinite(fps) || fps < 1 || fps > 30) return setError("LeRobot FPS 必须在 1 到 30 之间");
     void runAction(`/api/jobs/${id}/lerobot?fps=${encodeURIComponent(fps)}`, "LeRobot 数据集生成失败");
+  }
+
+  function resetUploadSettings() {
+    setRatio(HIGHEST_QUALITY_DEFAULTS.minDecodeRatio);
+    setIncludeLeRobot(HIGHEST_QUALITY_DEFAULTS.createLerobot);
+    setLeRobotFps(HIGHEST_QUALITY_DEFAULTS.lerobotFps);
+  }
+
+  function removeHistory() {
+    historyRecords.forEach((record) => clearedHistoryIdsRef.current.add(record.id));
+    clearHistory(window.localStorage);
+    setHistoryRecords([]);
   }
 
   return (
@@ -137,19 +219,23 @@ export default function Home() {
       <div className="app-scroll">
         <section className="workspace-intro">
           <div><span>MCAP Data Processing Workspace</span><h1>数据处理工作区</h1><p>视频导出 · 质量检测 · LeRobot 数据集</p></div>
-          <div className="workspace-stats"><div><strong>{jobs.length}</strong><span>任务总数</span></div><div><strong>{jobs.filter((job) => job.status === "processing").length}</strong><span>处理中</span></div><div><strong>{jobs.reduce((sum, job) => sum + job.results.filter((result) => !result.analysis_only).length, 0)}</strong><span>视频结果</span></div></div>
+          <div className="workspace-stats"><div><strong>{currentJobs.length}</strong><span>当前任务</span></div><div><strong>{currentJobs.filter((job) => job.status === "processing").length}</strong><span>处理中</span></div><div><strong>{historyRecords.length}</strong><span>历史记录</span></div></div>
         </section>
-        <UploadCard inputRef={inputRef} selected={selected} selectedBytes={selectedBytes} dragging={dragging} uploading={uploading}
+        <WorkspaceTabs value={view} historyCount={historyRecords.length} onChange={setView} />
+        {view === "current" ? <>
+          <UploadCard inputRef={inputRef} selected={selected} selectedBytes={selectedBytes} dragging={dragging} uploading={uploading}
           uploadProgress={uploadProgress} connected={backendReady} error={error} ratio={ratio} includeLeRobot={includeLeRobot}
           agentMessage={agentMessage}
           lerobotFps={lerobotFps} onChoose={onChoose} onDrop={onDrop} onDragging={setDragging} onClear={() => setSelected([])}
           onRemove={(key) => setSelected((current) => current.filter((item) => item.key !== key))} onRatio={setRatio}
-          onLeRobot={setIncludeLeRobot} onLeRobotFps={setLeRobotFps} onUpload={() => void uploadFiles(selected.map((item) => item.file))} />
-        <JobList jobs={jobs} connected={backendReady}
+          onLeRobot={setIncludeLeRobot} onLeRobotFps={setLeRobotFps} onResetSettings={resetUploadSettings}
+          onUpload={() => void uploadFiles(selected.map((item) => item.file))} />
+        <JobList jobs={currentJobs} connected={backendReady}
           onDelete={(id) => void runAction(`/api/jobs/${id}`, "删除任务失败", { method: "DELETE" })}
           onAnalyze={(id) => void runAction(`/api/jobs/${id}/analyze`, "检测运行失败")}
           onRetry={(id) => void runAction(`/api/jobs/${id}/retry`, "任务重试失败")}
           onLeRobot={createLeRobot} />
+        </> : <HistoryView records={historyRecords} connected={backendReady} onClear={removeHistory} />}
         <footer><span>MCAP 数据处理工作台</span><p>视频、分析报告和 LeRobot 数据集均保存在本机。</p></footer>
       </div>
     </main>
