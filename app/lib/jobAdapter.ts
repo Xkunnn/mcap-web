@@ -1,4 +1,5 @@
 import type { AnalysisMetric, Job, LeRobotResult, McapAnalysis, ResultItem, TopicCandidate } from "../types";
+import { classifyLerobotError, stripRepeatedErrorPrefix } from "./errorFormatter";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -154,7 +155,7 @@ export function normalizeJob(value: unknown): Job {
     lerobot_results: normalizeLerobotResults(item.lerobot_results),
     lerobot_errors: array(item.lerobot_errors).map((raw) => {
       const error = record(raw);
-      return { source: text(error.source, "LeRobot"), error: text(error.error, "未知错误") };
+      return { source: text(error.source, "LeRobot"), error: stripRepeatedErrorPrefix(text(error.error, "未知错误")) };
     }),
     succeeded_count: number(item.succeeded_count),
     failed_count: number(item.failed_count),
@@ -173,7 +174,9 @@ export function jobFailureDetails(job: Job): string[] {
   job.results.forEach((result) => {
     if (result.analysis?.error) messages.push(`${result.source}: ${result.analysis.error}`);
   });
-  job.lerobot_errors?.forEach((item) => messages.push(`${item.source}: ${item.error}`));
+  job.lerobot_errors
+    ?.filter((item) => classifyLerobotError(item.error) !== "unsupported")
+    .forEach((item) => messages.push(`${item.source}: ${item.error}`));
   if (job.return_code != null && job.return_code !== 0) messages.push(`进程返回码：${job.return_code}`);
   return [...new Set(messages)];
 }

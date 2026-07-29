@@ -3,16 +3,33 @@
 import { useState } from "react";
 import { agentUrl } from "../lib/agent";
 import { jobFailureDetails } from "../lib/jobAdapter";
+import {
+  fileStageLabels,
+  formatFileSize,
+  getJobDisplayName,
+  getJobDisplayStatus,
+  getJobFileSummary,
+  isJobLerobotUnsupported,
+  lerobotStatusLabels,
+  normalizeFileResults,
+  type FileStageStatus,
+  type LerobotStatus,
+  type NormalizedFileResult,
+} from "../lib/jobDisplay";
 import type { Job } from "../types";
 import { elapsedTime, formatBytes, formatDate, statusLabel } from "../utils";
 import { AnalysisDashboard } from "./AnalysisDashboard";
 import { DetailedMetrics } from "./DetailedMetrics";
+import { LerobotCompatibilityNotice } from "./LerobotCompatibilityNotice";
 import { VideoGallery } from "./VideoGallery";
 
 type Tab = "analysis" | "video" | "metrics" | "dataset";
 
 function DatasetGallery({ job }: { job: Job }) {
-  if (!job.lerobot_results?.length && !job.lerobot_errors?.length) return <div className="empty-inline"><span>◇</span><strong>当前任务尚未生成 LeRobot 数据集</strong><p>点击“生成 LeRobot”创建训练数据集。</p></div>;
+  const files = normalizeFileResults(job);
+  if (!job.lerobot_results?.length && !job.lerobot_errors?.length && !files.some((file) => file.lerobotStatus === "unsupported")) {
+    return <div className="empty-inline"><span>◇</span><strong>当前任务尚未生成 LeRobot 数据集</strong><p>点击“生成 LeRobot”创建训练数据集。</p></div>;
+  }
   return <div className="dataset-grid">
     {(job.lerobot_results || []).map((dataset) => <article className="dataset-card" key={dataset.download_url}>
       <div><span>LR</span><p><strong>{dataset.name}</strong><small>{dataset.robot_type || "LivUMI-Ego-Lite"}</small></p><em>{dataset.version || "v3.0"}</em></div>
@@ -20,16 +37,74 @@ function DatasetGallery({ job }: { job: Job }) {
       <dl><div><dt>版本</dt><dd>{dataset.version || "v3.0"}</dd></div><div><dt>FPS</dt><dd>{dataset.fps ?? "—"}</dd></div><div><dt>Episodes</dt><dd>{dataset.episodes ?? 0}</dd></div><div><dt>Frames</dt><dd>{dataset.frames?.toLocaleString("zh-CN") ?? 0}</dd></div><div><dt>完整率</dt><dd>{dataset.completeness_pct?.toFixed(2) ?? "—"}%</dd></div><div><dt>视频大小</dt><dd>{dataset.video_size_mb?.toFixed(2) ?? "—"} MB</dd></div><div><dt>ZIP 大小</dt><dd>{formatBytes(dataset.archive_size)}</dd></div></dl>
       <div className="card-actions"><a href={agentUrl(dataset.download_url)}>下载 ZIP</a><a href={agentUrl(dataset.info_url)}>查看 info.json</a></div>
     </article>)}
-    {(job.lerobot_errors || []).map((item) => <div className="error-banner" key={`${item.source}-${item.error}`}><strong>{item.source}</strong><span>{item.error}</span></div>)}
+    {(job.lerobot_errors || []).map((item) => <LerobotCompatibilityNotice key={`${item.source}-${item.error}`} source={item.source} error={item.error} />)}
+    {files.filter((file) => file.lerobotStatus === "unsupported" && !file.lerobotErrors.length).map((file) => (
+      <LerobotCompatibilityNotice
+        key={`inferred-${file.name}`}
+        source={file.name}
+        error="未找到 /ego/camera/0 视频流；LeRobot 导出仅支持 LivUMI Ego 主相机数据"
+      />
+    ))}
   </div>;
+}
+
+function StatusBadge({ status, kind }: { status: FileStageStatus | LerobotStatus; kind: "stage" | "lerobot" }) {
+  const label = kind === "lerobot"
+    ? lerobotStatusLabels[status as LerobotStatus]
+    : fileStageLabels[status as FileStageStatus];
+  return <span className={`file-status file-status-${status}`}>{label}</span>;
+}
+
+function FileResultList({ files }: { files: NormalizedFileResult[] }) {
+  return (
+    <div className="job-file-list">
+      <div className="job-file-list-head"><span>#</span><span>文件名</span><span>大小</span><span>视频转换</span><span>质量分析</span><span>LeRobot</span></div>
+      {files.map((file) => (
+        <div className="job-file-row" key={`${file.index}-${file.name}`}>
+          <span>{file.index + 1}</span>
+          <strong title={file.name}>{file.name}</strong>
+          <span>{formatFileSize(file.size)}</span>
+          <StatusBadge status={file.videoStatus} kind="stage" />
+          <StatusBadge status={file.analysisStatus} kind="stage" />
+          <StatusBadge status={file.lerobotStatus} kind="lerobot" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function stageSummary(files: NormalizedFileResult[], field: "videoStatus" | "analysisStatus"): string {
+  const completed = files.filter((file) => file[field] === "completed").length;
+  const pending = files.some((file) => file[field] === "pending");
+  if (completed === files.length && files.length) return "成功";
+  if (pending) return "处理中";
+  return `${completed}/${files.length} 成功`;
+}
+
+function lerobotSummary(files: NormalizedFileResult[]): string {
+  if (files.length && files.every((file) => file.lerobotStatus === "unsupported")) return "不兼容";
+  if (files.some((file) => file.lerobotStatus === "pending")) return "处理中";
+  const completed = files.filter((file) => file.lerobotStatus === "completed").length;
+  const unsupported = files.filter((file) => file.lerobotStatus === "unsupported").length;
+  const failed = files.filter((file) => file.lerobotStatus === "failed").length;
+  if (completed === files.length && files.length) return "已生成";
+  if (!completed && !unsupported && !failed) return "未请求";
+  return [
+    completed ? `${completed} 已生成` : "",
+    unsupported ? `${unsupported} 不兼容` : "",
+    failed ? `${failed} 失败` : "",
+  ].filter(Boolean).join(" · ");
 }
 
 function JobCard({ job, onDelete, onAnalyze, onLeRobot, onRetry }: {
   job: Job; onDelete: (id: string) => void; onAnalyze: (id: string) => void; onLeRobot: (id: string) => void; onRetry: (id: string) => void;
 }) {
   const [tab, setTab] = useState<Tab>("analysis");
-  const totalSize = job.files.reduce((sum, file) => sum + file.size, 0);
+  const [filesExpanded, setFilesExpanded] = useState(false);
   const busy = job.status === "queued" || job.status === "processing";
+  const fileResults = normalizeFileResults(job);
+  const displayStatus = getJobDisplayStatus(job);
+  const lerobotUnsupported = isJobLerobotUnsupported(job);
   const videoResults = job.results.filter((result) => !result.analysis_only && result.view_url && result.download_url);
   const analysisResults = [...new Map(
     job.results.filter((result) => result.analysis).map((result) => [result.source, result]),
@@ -38,19 +113,30 @@ function JobCard({ job, onDelete, onAnalyze, onLeRobot, onRetry }: {
   return <article className="job-card">
     <div className="job-summary">
       <div className="job-file-icon">MC</div>
-      <div className="job-name"><strong>{job.files[0]?.name || `${job.file_count} MCAP files`}</strong><span>{job.file_count > 1 ? `+ ${job.file_count - 1} more files · ` : ""}{formatBytes(totalSize)}</span></div>
-      <span className={`job-status status-${job.status}`}><i />{statusLabel(job.status)}</span>
+      <div className="job-name"><strong>{getJobDisplayName(job)}</strong><span>{getJobFileSummary(job)}</span></div>
+      <span className={`job-status status-${displayStatus}`}><i />{statusLabel(displayStatus)}</span>
       <div className="job-time"><span>CREATED</span><strong>{formatDate(job.created_at)}</strong></div>
       <div className="job-time"><span>耗时</span><strong>{elapsedTime(job.started_at || job.created_at, job.finished_at)}</strong></div>
       <div className="job-actions">
         <button disabled={busy || !job.files.length} onClick={() => onAnalyze(job.id)}>运行分析</button>
-        <button disabled={busy || !job.files.length} onClick={() => onLeRobot(job.id)}>生成 LeRobot</button>
-        <button disabled={busy || job.status !== "failed"} onClick={() => onRetry(job.id)}>重试</button>
+        <button
+          disabled={busy || !job.files.length || lerobotUnsupported}
+          title={lerobotUnsupported ? "未检测到 LivUMI Ego 主相机视频流 /ego/camera/0" : undefined}
+          onClick={() => onLeRobot(job.id)}
+        >{lerobotUnsupported ? "不支持 LeRobot" : "生成 LeRobot"}</button>
+        <button disabled={busy || displayStatus !== "failed"} onClick={() => onRetry(job.id)}>重试</button>
         <button disabled={busy} className="danger" onClick={() => onDelete(job.id)}>删除</button>
       </div>
     </div>
     <div className="job-progress-line"><span style={{ width: `${job.progress}%` }} /></div>
     <div className="job-message"><span>{job.message}</span><span>成功 {job.succeeded_count} · 失败 {job.failed_count}</span><strong>{job.progress}%</strong></div>
+    <div className="job-stage-summary">
+      <span>视频导出：<strong>{stageSummary(fileResults, "videoStatus")}</strong></span>
+      <span>质量分析：<strong>{stageSummary(fileResults, "analysisStatus")}</strong></span>
+      <span>LeRobot：<strong>{lerobotSummary(fileResults)}</strong></span>
+      {job.file_count > 1 && <button onClick={() => setFilesExpanded((value) => !value)}>{filesExpanded ? "收起文件列表" : "查看全部文件"}</button>}
+    </div>
+    {filesExpanded && <FileResultList files={fileResults} />}
     {busy ? <div className="processing-state"><span className="spinner" /><div><strong>Processing pipeline</strong><p>任务正在本地 Agent 中运行，结果会自动刷新。</p></div></div> : <>
       <nav className="result-tabs" aria-label="任务结果">
         <button className={tab === "analysis" ? "active" : ""} onClick={() => setTab("analysis")}>分析概览 <span>{analysisResults.length}</span></button>
@@ -59,7 +145,7 @@ function JobCard({ job, onDelete, onAnalyze, onLeRobot, onRetry }: {
         <button className={tab === "dataset" ? "active" : ""} onClick={() => setTab("dataset")}>LeRobot <span>{job.lerobot_results?.length || 0}</span></button>
       </nav>
       <div className="tab-content">
-        {tab === "analysis" && (analysisResults.length ? <AnalysisDashboard results={analysisResults} /> : <div className="failure-details"><strong>{job.status === "failed" ? "任务未生成可展示的分析结果" : "等待分析结果"}</strong>{failures.map((message, index) => <p key={`${message}-${index}`}>{message}</p>)}</div>)}
+        {tab === "analysis" && (analysisResults.length ? <AnalysisDashboard results={analysisResults} /> : <div className="failure-details"><strong>{displayStatus === "failed" ? "任务未生成可展示的分析结果" : "等待分析结果"}</strong>{failures.map((message, index) => <p key={`${message}-${index}`}>{message}</p>)}</div>)}
         {tab === "video" && <VideoGallery results={videoResults} />}
         {tab === "metrics" && <DetailedMetrics results={job.results} />}
         {tab === "dataset" && <DatasetGallery job={job} />}
