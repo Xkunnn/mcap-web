@@ -14,10 +14,10 @@ test("static export contains the MCAP batch console", async () => {
   assert.match(html, /处理任务与分析结果/);
   assert.match(html, /视频导出 · 质量检测 · LeRobot 数据集/);
   assert.match(html, /Minimum completeness · [\s\S]*?100[\s\S]*?%/);
-  assert.match(html, /LeRobot V3.0 训练数据集/);
-  assert.match(html, /始终生成，不再提供关闭选项/);
-  assert.doesNotMatch(html, /type="checkbox"/);
-  assert.match(html, /value="12"/);
+  assert.match(html, /生成 LeRobot 训练数据集/);
+  assert.match(html, /固定 12 FPS，无需手动设置/);
+  assert.match(html, /type="checkbox"/);
+  assert.doesNotMatch(html, /<span>LeRobot FPS<\/span>/);
   assert.match(html, /当前检测/);
   assert.match(html, /历史记录/);
   assert.match(html, /恢复最高质量默认设置/);

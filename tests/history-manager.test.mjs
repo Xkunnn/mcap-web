@@ -103,7 +103,7 @@ test("upload settings persist and reset to defaults when cache is absent", () =>
   assert.deepEqual(settings.loadUploadSettings(storage), settings.HIGHEST_QUALITY_DEFAULTS);
   const custom = { minDecodeRatio: "0.99", createLerobot: false, lerobotFps: "24" };
   settings.saveUploadSettings(storage, custom);
-  assert.deepEqual(settings.loadUploadSettings(storage), { ...custom, createLerobot: true });
+  assert.deepEqual(settings.loadUploadSettings(storage), { ...custom, lerobotFps: "12" });
   storage.removeItem(settings.UPLOAD_SETTINGS_KEY);
   assert.deepEqual(settings.loadUploadSettings(storage), settings.HIGHEST_QUALITY_DEFAULTS);
 });
