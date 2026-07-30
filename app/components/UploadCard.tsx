@@ -6,16 +6,16 @@ import { formatBytes } from "../utils";
 
 export function UploadCard({
   inputRef, selected, selectedBytes, dragging, uploading, uploadProgress, connected, error,
-  ratio, includeLeRobot, lerobotFps, agentMessage, onChoose, onDrop, onDragging, onClear, onRemove,
-  onRatio, onLeRobot, onLeRobotFps, onResetSettings, onUpload,
+  ratio, lerobotFps, agentMessage, onChoose, onDrop, onDragging, onClear, onRemove,
+  onRatio, onLeRobotFps, onResetSettings, onUpload,
 }: {
   inputRef: RefObject<HTMLInputElement | null>; selected: UploadFileItem[]; selectedBytes: number;
   dragging: boolean; uploading: boolean; uploadProgress: number; connected: boolean | null; error: string;
-  ratio: string; includeLeRobot: boolean; lerobotFps: string;
+  ratio: string; lerobotFps: string;
   agentMessage?: string;
   onChoose: (e: ChangeEvent<HTMLInputElement>) => void; onDrop: (e: DragEvent<HTMLDivElement>) => void;
   onDragging: (value: boolean) => void; onClear: () => void; onRemove: (key: string) => void;
-  onRatio: (value: string) => void; onLeRobot: (value: boolean) => void; onLeRobotFps: (value: string) => void;
+  onRatio: (value: string) => void; onLeRobotFps: (value: string) => void;
   onResetSettings: () => void; onUpload: () => void;
 }) {
   return (
@@ -38,8 +38,8 @@ export function UploadCard({
       </div>}
       <div className="pipeline-options">
         <label><span>Minimum completeness · {Math.round((Number(ratio) || 0) * 100)}%</span><input value={ratio} onChange={(e) => onRatio(e.target.value)} inputMode="decimal" /><small>要求视频帧全部成功解码。若原始 MCAP 存在损坏帧或解码失败，任务可能无法通过。需要提高兼容性时可调整为 99%。</small></label>
-        <label className="switch-row"><input type="checkbox" checked={includeLeRobot} onChange={(e) => onLeRobot(e.target.checked)} /><span className="switch" /><div><strong>LeRobot V3.0</strong><small>默认生成 LeRobot 训练数据集</small><em>仅包含受支持 LivUMI Ego 主相机数据的 MCAP 文件可以生成 LeRobot 数据集。不兼容文件仍可完成视频导出和质量检测。</em></div></label>
-        <label><span>LeRobot FPS</span><input disabled={!includeLeRobot} value={lerobotFps} onChange={(e) => onLeRobotFps(e.target.value)} inputMode="decimal" min="1" max="60" /><small>{includeLeRobot ? "可设置 1～60 FPS，默认 12 FPS。" : "已关闭训练数据集生成，不影响视频导出和质量分析。"}</small></label>
+        <div className="fixed-option"><strong>LeRobot V3.0 训练数据集</strong><small>始终生成，不再提供关闭选项。若 MCAP 不兼容，视频导出和质量分析仍会正常完成。</small></div>
+        <label><span>LeRobot FPS</span><input value={lerobotFps} onChange={(e) => onLeRobotFps(e.target.value)} inputMode="numeric" min="1" max="60" /><small>可设置 1～60 FPS，默认 12 FPS；不会影响 100% 视频解码完整率要求。</small></label>
         <button className="primary-button" disabled={!selected.length || uploading || !connected} onClick={onUpload}>{uploading ? `Uploading ${uploadProgress}%` : `Start Processing${selected.length ? ` · ${selected.length}` : ""}`}</button>
       </div>
       <button className="settings-reset-button" onClick={onResetSettings}>恢复最高质量默认设置</button>

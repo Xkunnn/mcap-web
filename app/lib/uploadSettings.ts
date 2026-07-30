@@ -22,9 +22,7 @@ export function normalizeUploadSettings(value: unknown): UploadSettings {
     minDecodeRatio: Number.isFinite(ratio) && ratio >= 0 && ratio <= 1
       ? String(item.minDecodeRatio)
       : HIGHEST_QUALITY_DEFAULTS.minDecodeRatio,
-    createLerobot: typeof item.createLerobot === "boolean"
-      ? item.createLerobot
-      : HIGHEST_QUALITY_DEFAULTS.createLerobot,
+    createLerobot: true,
     lerobotFps: Number.isFinite(fps) && fps >= 1 && fps <= 60
       ? String(item.lerobotFps)
       : HIGHEST_QUALITY_DEFAULTS.lerobotFps,
@@ -48,6 +46,6 @@ export function appendUploadSettings(formData: FormData, settings: UploadSetting
   const normalized = normalizeUploadSettings(settings);
   const ratio = Number(normalized.minDecodeRatio);
   formData.append("min_decode_ratio", ratio === 1 ? "1.0" : String(ratio));
-  formData.append("create_lerobot", String(normalized.createLerobot));
+  formData.append("create_lerobot", "true");
   formData.append("lerobot_fps", String(Number(normalized.lerobotFps)));
 }

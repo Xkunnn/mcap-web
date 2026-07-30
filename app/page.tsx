@@ -44,7 +44,6 @@ export default function Home() {
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [ratio, setRatio] = useState(HIGHEST_QUALITY_DEFAULTS.minDecodeRatio);
-  const [includeLeRobot, setIncludeLeRobot] = useState(HIGHEST_QUALITY_DEFAULTS.createLerobot);
   const [lerobotFps, setLeRobotFps] = useState(HIGHEST_QUALITY_DEFAULTS.lerobotFps);
   const [lerobotGeneratingIds, setLerobotGeneratingIds] = useState<Set<string>>(() => new Set());
   const [error, setError] = useState("");
@@ -69,7 +68,6 @@ export default function Home() {
     const timer = window.setTimeout(() => {
       const settings = loadUploadSettings(window.localStorage);
       setRatio(settings.minDecodeRatio);
-      setIncludeLeRobot(settings.createLerobot);
       setLeRobotFps(settings.lerobotFps);
       setHistoryRecords(loadHistory(window.localStorage));
       settingsLoadedRef.current = true;
@@ -81,10 +79,10 @@ export default function Home() {
     if (!settingsLoadedRef.current) return;
     saveUploadSettings(window.localStorage, {
       minDecodeRatio: ratio,
-      createLerobot: includeLeRobot,
+      createLerobot: true,
       lerobotFps,
     });
-  }, [ratio, includeLeRobot, lerobotFps]);
+  }, [ratio, lerobotFps]);
 
   const refreshJobs = useCallback(async () => {
     try {
@@ -152,12 +150,12 @@ export default function Home() {
     if (!batch.length || uploadingRef.current) return;
     if (!backendReady) return setError("请启动 MCAP Agent（运行 mcap-agent/start_agent.sh）");
     if (!Number.isFinite(numericRatio) || numericRatio < 0 || numericRatio > 1) return setError("最低数据完整率必须在 0 到 1 之间");
-    if (includeLeRobot && (!Number.isFinite(numericFps) || numericFps < 1 || numericFps > 60)) return setError("LeRobot FPS 必须在 1 到 60 之间");
+    if (!Number.isFinite(numericFps) || numericFps < 1 || numericFps > 60) return setError("LeRobot FPS 必须在 1 到 60 之间");
     const data = new FormData();
     batch.forEach((file) => data.append("files", file));
     appendUploadSettings(data, {
       minDecodeRatio: ratio,
-      createLerobot: includeLeRobot,
+      createLerobot: true,
       lerobotFps,
     });
     const request = new XMLHttpRequest();
@@ -244,7 +242,6 @@ export default function Home() {
 
   function resetUploadSettings() {
     setRatio(HIGHEST_QUALITY_DEFAULTS.minDecodeRatio);
-    setIncludeLeRobot(HIGHEST_QUALITY_DEFAULTS.createLerobot);
     setLeRobotFps(HIGHEST_QUALITY_DEFAULTS.lerobotFps);
   }
 
@@ -265,11 +262,11 @@ export default function Home() {
         <WorkspaceTabs value={view} historyCount={historyRecords.length} onChange={setView} />
         {view === "current" ? <>
           <UploadCard inputRef={inputRef} selected={selected} selectedBytes={selectedBytes} dragging={dragging} uploading={uploading}
-          uploadProgress={uploadProgress} connected={backendReady} error={error} ratio={ratio} includeLeRobot={includeLeRobot}
+          uploadProgress={uploadProgress} connected={backendReady} error={error} ratio={ratio}
           agentMessage={agentMessage}
           lerobotFps={lerobotFps} onChoose={onChoose} onDrop={onDrop} onDragging={setDragging} onClear={() => setSelected([])}
           onRemove={(key) => setSelected((current) => current.filter((item) => item.key !== key))} onRatio={setRatio}
-          onLeRobot={setIncludeLeRobot} onLeRobotFps={setLeRobotFps} onResetSettings={resetUploadSettings}
+          onLeRobotFps={setLeRobotFps} onResetSettings={resetUploadSettings}
           onUpload={() => void uploadFiles(selected.map((item) => item.file))} />
         <JobList jobs={currentJobs} connected={backendReady} generatingIds={lerobotGeneratingIds}
           onDelete={(id) => void runAction(`/api/jobs/${id}`, "删除任务失败", { method: "DELETE" })}
