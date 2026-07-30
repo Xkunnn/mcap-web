@@ -112,6 +112,15 @@ export function normalizeVideoResults(value: unknown): ResultItem[] {
 export function normalizeLerobotResults(value: unknown): LeRobotResult[] {
   return array(value).map((raw, index) => {
     const item = record(raw);
+    const rawPreviews = array(item.camera_previews).length ? array(item.camera_previews) : array(item.previews);
+    const cameraPreviews = rawPreviews.map((rawPreview) => {
+      const preview = record(rawPreview);
+      return {
+        key: text(preview.key) || undefined,
+        label: text(preview.label) || undefined,
+        preview_url: text(preview.preview_url),
+      };
+    }).filter((preview) => preview.preview_url);
     return {
       source: text(item.source, `MCAP ${index + 1}`),
       name: text(item.name, `lerobot-${index + 1}`),
@@ -127,6 +136,7 @@ export function normalizeLerobotResults(value: unknown): LeRobotResult[] {
       download_url: text(item.download_url),
       info_url: text(item.info_url),
       preview_url: text(item.preview_url) || undefined,
+      camera_previews: cameraPreviews.length ? cameraPreviews : undefined,
     };
   });
 }

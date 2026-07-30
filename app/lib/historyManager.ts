@@ -1,6 +1,7 @@
 import type { Job, LeRobotResult } from "../types";
 import { stripRepeatedErrorPrefix } from "./errorFormatter";
 import { getJobDisplayStatus, normalizeFileResults, type LerobotStatus } from "./jobDisplay";
+import { currentLerobotErrors, latestLerobotResults } from "./lerobotDisplay";
 
 export const HISTORY_STORAGE_KEY = "mcap-web-history-v1";
 export const ARCHIVE_AFTER_MS = 24 * 60 * 60 * 1000;
@@ -53,6 +54,10 @@ export type HistoryRecord = {
     downloadUrl: string;
     infoUrl: string;
     previewUrl?: string;
+    robotType?: string;
+    version?: string;
+    fps?: number;
+    cameraPreviews?: { key?: string; label?: string; previewUrl: string }[];
   }[];
   lerobotUnsupportedCount: number;
   errors: { source?: string; message: string }[];
@@ -114,6 +119,14 @@ function slimLerobot(result: LeRobotResult): HistoryRecord["lerobotResults"][num
     downloadUrl: result.download_url,
     infoUrl: result.info_url,
     previewUrl: result.preview_url,
+    robotType: result.robot_type,
+    version: result.version,
+    fps: result.fps,
+    cameraPreviews: result.camera_previews?.map((preview) => ({
+      key: preview.key,
+      label: preview.label,
+      previewUrl: preview.preview_url,
+    })),
   };
 }
 
@@ -173,11 +186,11 @@ export function createHistoryRecord(job: Job): HistoryRecord {
         reportUrl: result.analysis?.report_url,
       }]),
     ).values()],
-    lerobotResults: (job.lerobot_results || []).map(slimLerobot),
+    lerobotResults: latestLerobotResults(job.lerobot_results).map(slimLerobot),
     lerobotUnsupportedCount: files.filter((file) => file.lerobotStatus === "unsupported").length,
     errors: [
       ...(job.error ? [{ message: stripRepeatedErrorPrefix(job.error) }] : []),
-      ...(job.lerobot_errors || []).map((error) => ({
+      ...currentLerobotErrors(job).map((error) => ({
         source: error.source,
         message: stripRepeatedErrorPrefix(error.error),
       })),

@@ -26,6 +26,15 @@ const {
   formatLerobotError,
   stripRepeatedErrorPrefix,
 } = await import(errorModuleUrl);
+const lerobotDisplay = await import(moduleUrl(stripTypeScriptTypes(
+  await readFile(new URL("../app/lib/lerobotDisplay.ts", import.meta.url), "utf8"),
+  { mode: "transform" },
+)));
+const adapterSource = await readFile(new URL("../app/lib/jobAdapter.ts", import.meta.url), "utf8");
+const adapter = await import(moduleUrl(stripTypeScriptTypes(
+  adapterSource.replace("\"./errorFormatter\"", JSON.stringify(errorModuleUrl)),
+  { mode: "transform" },
+)));
 
 function job(overrides = {}) {
   return {
@@ -114,6 +123,19 @@ test("keeps successful video and analysis task completed when LeRobot is unsuppo
   assert.equal(getJobDisplayStatus(unsupported), "completed");
 });
 
+test("keeps successful video and analysis completed after a real LeRobot failure", () => {
+  const source = "stereo failed.mcap";
+  const failed = job({
+    status: "failed",
+    create_lerobot: true,
+    files: [{ name: source, size: 10 }],
+    results: [successfulResult(source)],
+    lerobot_errors: [{ source, error: "RuntimeError: 没有可导出的同步 episode" }],
+  });
+  assert.equal(normalizeFileResults(failed)[0].lerobotStatus, "failed");
+  assert.equal(getJobDisplayStatus(failed), "completed");
+});
+
 test("distinguishes LeRobot requested states per file", () => {
   const pending = job({ status: "processing", create_lerobot: true });
   assert.equal(normalizeFileResults(pending)[0].lerobotStatus, "pending");
@@ -160,6 +182,51 @@ test("cleans and classifies LeRobot errors without duplicate RuntimeError", () =
   assert.equal(formatted.title, "该文件不支持生成 LeRobot V3.0");
   assert.match(formatted.description, /\/ego\/camera\/0/);
   assert.doesNotMatch(formatted.detail, /RuntimeError:\s*RuntimeError:/);
+});
+
+test("normalizes mono, stereo and future preview payloads without requiring optional fields", () => {
+  const [legacy, stereo, alias] = adapter.normalizeLerobotResults([
+    { source: "中文 文件.mcap", name: "legacy", download_url: "/d", info_url: "/i" },
+    {
+      source: "two-stream.mcap",
+      name: "stereo",
+      robot_type: "LivUMI-Ego-Lite-stereo",
+      preview_url: "/old-left.mp4",
+      camera_previews: [
+        { key: "observation.images.left", label: "左相机", preview_url: "/left.mp4" },
+        { key: "observation.images.right", label: "右相机", preview_url: "/right.mp4" },
+      ],
+      unknown_future_field: { safe: true },
+    },
+    { source: "side-by-side.mcap", name: "sbs", robot_type: "custom-stereo-side-by-side", previews: [{ label: "拼接源", preview_url: "/sbs.mp4" }] },
+  ]);
+  assert.equal(legacy.robot_type, undefined);
+  assert.deepEqual(lerobotDisplay.getDatasetPreviews(legacy), []);
+  assert.equal(lerobotDisplay.isStereoDataset(stereo), true);
+  assert.deepEqual(lerobotDisplay.getDatasetPreviews(stereo).map((item) => item.label), ["左相机", "右相机"]);
+  assert.equal(lerobotDisplay.getDatasetPreviews(stereo)[0].preview_url, "/left.mp4");
+  assert.equal(lerobotDisplay.isStereoDataset(alias), true);
+  assert.equal(lerobotDisplay.getDatasetPreviews(alias)[0].preview_url, "/sbs.mp4");
+});
+
+test("labels a lone legacy preview as left camera and suppresses an old same-source failure", () => {
+  const result = {
+    source: "目录/中文 空格.mcap",
+    name: "dataset",
+    archive_size: 1,
+    download_url: "/d",
+    info_url: "/i",
+    preview_url: "/preview.mp4",
+  };
+  assert.equal(lerobotDisplay.getDatasetPreviews(result)[0].label, "左相机预览");
+  assert.deepEqual(lerobotDisplay.getDatasetPreviews({ ...result, preview_url: undefined }), []);
+  assert.deepEqual(lerobotDisplay.currentLerobotErrors({
+    lerobot_results: [result],
+    lerobot_errors: [
+      { source: "中文 空格.mcap", error: "旧失败" },
+      { source: "other.mcap", error: "当前失败" },
+    ],
+  }), [{ source: "other.mcap", error: "当前失败" }]);
 });
 
 if (process.env.MCAP_JOBS_FIXTURE) {

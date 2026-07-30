@@ -117,6 +117,7 @@ export function getJobDisplayStatus(job: Job): Job["status"] {
   const lerobotNonFatal = files.every(
     (file) => file.lerobotStatus === "completed"
       || file.lerobotStatus === "unsupported"
+      || file.lerobotStatus === "failed"
       || file.lerobotStatus === "not_requested",
   );
   return primarySucceeded && lerobotNonFatal ? "completed" : job.status;

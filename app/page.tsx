@@ -16,7 +16,7 @@ import {
   saveHistory,
   type HistoryRecord,
 } from "./lib/historyManager";
-import { normalizeJobs } from "./lib/jobAdapter";
+import { normalizeJob, normalizeJobs } from "./lib/jobAdapter";
 import {
   appendUploadSettings,
   HIGHEST_QUALITY_DEFAULTS,
@@ -33,6 +33,7 @@ export default function Home() {
   const inputRef = useRef<HTMLInputElement>(null);
   const uploadingRef = useRef(false);
   const settingsLoadedRef = useRef(false);
+  const lerobotGeneratingRef = useRef<Set<string>>(new Set());
   const clearedHistoryIdsRef = useRef<Set<string>>(new Set());
   const [selected, setSelected] = useState<UploadFileItem[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -45,6 +46,7 @@ export default function Home() {
   const [ratio, setRatio] = useState(HIGHEST_QUALITY_DEFAULTS.minDecodeRatio);
   const [includeLeRobot, setIncludeLeRobot] = useState(HIGHEST_QUALITY_DEFAULTS.createLerobot);
   const [lerobotFps, setLeRobotFps] = useState(HIGHEST_QUALITY_DEFAULTS.lerobotFps);
+  const [lerobotGeneratingIds, setLerobotGeneratingIds] = useState<Set<string>>(() => new Set());
   const [error, setError] = useState("");
   const [backendReady, setBackendReady] = useState<boolean | null>(null);
   const [agentMessage, setAgentMessage] = useState("正在连接本地 Agent");
@@ -150,7 +152,7 @@ export default function Home() {
     if (!batch.length || uploadingRef.current) return;
     if (!backendReady) return setError("请启动 MCAP Agent（运行 mcap-agent/start_agent.sh）");
     if (!Number.isFinite(numericRatio) || numericRatio < 0 || numericRatio > 1) return setError("最低数据完整率必须在 0 到 1 之间");
-    if (includeLeRobot && (!Number.isFinite(numericFps) || numericFps < 1 || numericFps > 30)) return setError("LeRobot FPS 必须在 1 到 30 之间");
+    if (includeLeRobot && (!Number.isFinite(numericFps) || numericFps < 1 || numericFps > 60)) return setError("LeRobot FPS 必须在 1 到 60 之间");
     const data = new FormData();
     batch.forEach((file) => data.append("files", file));
     appendUploadSettings(data, {
@@ -195,10 +197,49 @@ export default function Home() {
     }
   }
 
-  function createLeRobot(id: string) {
+  async function createLeRobot(id: string) {
     const fps = Number(lerobotFps);
-    if (!Number.isFinite(fps) || fps < 1 || fps > 30) return setError("LeRobot FPS 必须在 1 到 30 之间");
-    void runAction(`/api/jobs/${id}/lerobot?fps=${encodeURIComponent(fps)}`, "LeRobot 数据集生成失败");
+    if (!Number.isFinite(fps) || fps < 1 || fps > 60) return setError("LeRobot FPS 必须在 1 到 60 之间");
+    if (lerobotGeneratingRef.current.has(id)) return;
+    lerobotGeneratingRef.current.add(id);
+    setLerobotGeneratingIds((current) => new Set(current).add(id));
+    setError("");
+    try {
+      const response = await requestAgent(`/api/jobs/${id}/lerobot?fps=${encodeURIComponent(fps)}`, { method: "POST" });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.detail || `LeRobot 数据集生成失败（HTTP ${response.status}）`);
+      }
+      while (lerobotGeneratingRef.current.has(id)) {
+        const jobResponse = await requestAgent(`/api/jobs/${id}`);
+        if (!jobResponse.ok) throw new Error(`任务状态读取失败（HTTP ${jobResponse.status}）`);
+        const updated = normalizeJob(await jobResponse.json());
+        setBackendReady(true);
+        setJobs((current) => {
+          const exists = current.some((job) => job.id === updated.id);
+          return exists
+            ? current.map((job) => job.id === updated.id ? updated : job)
+            : [updated, ...current];
+        });
+        if (updated.status === "completed" || updated.status === "failed") {
+          const now = Date.now();
+          setArchiveNow(now);
+          syncHistory([updated], now);
+          break;
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 1500));
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "LeRobot 数据集生成失败：无法连接本地 Agent。");
+    } finally {
+      lerobotGeneratingRef.current.delete(id);
+      setLerobotGeneratingIds((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
+      void refreshJobs();
+    }
   }
 
   function resetUploadSettings() {
@@ -230,11 +271,11 @@ export default function Home() {
           onRemove={(key) => setSelected((current) => current.filter((item) => item.key !== key))} onRatio={setRatio}
           onLeRobot={setIncludeLeRobot} onLeRobotFps={setLeRobotFps} onResetSettings={resetUploadSettings}
           onUpload={() => void uploadFiles(selected.map((item) => item.file))} />
-        <JobList jobs={currentJobs} connected={backendReady}
+        <JobList jobs={currentJobs} connected={backendReady} generatingIds={lerobotGeneratingIds}
           onDelete={(id) => void runAction(`/api/jobs/${id}`, "删除任务失败", { method: "DELETE" })}
           onAnalyze={(id) => void runAction(`/api/jobs/${id}/analyze`, "检测运行失败")}
           onRetry={(id) => void runAction(`/api/jobs/${id}/retry`, "任务重试失败")}
-          onLeRobot={createLeRobot} />
+          onLeRobot={(id) => void createLeRobot(id)} />
         </> : <HistoryView records={historyRecords} connected={backendReady} onClear={removeHistory} />}
         <footer><span>MCAP 数据处理工作台</span><p>视频、分析报告和 LeRobot 数据集均保存在本机。</p></footer>
       </div>

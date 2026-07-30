@@ -9,7 +9,7 @@ export type UploadSettings = {
 export const HIGHEST_QUALITY_DEFAULTS: UploadSettings = {
   minDecodeRatio: "1.00",
   createLerobot: true,
-  lerobotFps: "30",
+  lerobotFps: "12",
 };
 
 type StorageLike = Pick<Storage, "getItem" | "setItem">;
@@ -25,7 +25,7 @@ export function normalizeUploadSettings(value: unknown): UploadSettings {
     createLerobot: typeof item.createLerobot === "boolean"
       ? item.createLerobot
       : HIGHEST_QUALITY_DEFAULTS.createLerobot,
-    lerobotFps: Number.isFinite(fps) && fps >= 1 && fps <= 30
+    lerobotFps: Number.isFinite(fps) && fps >= 1 && fps <= 60
       ? String(item.lerobotFps)
       : HIGHEST_QUALITY_DEFAULTS.lerobotFps,
   };

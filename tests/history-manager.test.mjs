@@ -16,10 +16,15 @@ const jobDisplayUrl = moduleUrl(stripTypeScriptTypes(
   (await source("../app/lib/jobDisplay.ts")).replace("\"./errorFormatter\"", JSON.stringify(errorUrl)),
   { mode: "transform" },
 ));
+const lerobotDisplayUrl = moduleUrl(stripTypeScriptTypes(
+  await source("../app/lib/lerobotDisplay.ts"),
+  { mode: "transform" },
+));
 const historyManagerUrl = moduleUrl(stripTypeScriptTypes(
   (await source("../app/lib/historyManager.ts"))
     .replace("\"./errorFormatter\"", JSON.stringify(errorUrl))
-    .replace("\"./jobDisplay\"", JSON.stringify(jobDisplayUrl)),
+    .replace("\"./jobDisplay\"", JSON.stringify(jobDisplayUrl))
+    .replace("\"./lerobotDisplay\"", JSON.stringify(lerobotDisplayUrl)),
   { mode: "transform" },
 ));
 
@@ -50,7 +55,7 @@ function job(overrides = {}) {
     message: "完成",
     min_decode_ratio: 1,
     create_lerobot: true,
-    lerobot_fps: 30,
+    lerobot_fps: 12,
     results: [{
       source: "recording.mcap",
       name: "recording.mp4",
@@ -84,13 +89,13 @@ test("highest-quality upload defaults and FormData values are exact", () => {
   assert.deepEqual(settings.HIGHEST_QUALITY_DEFAULTS, {
     minDecodeRatio: "1.00",
     createLerobot: true,
-    lerobotFps: "30",
+    lerobotFps: "12",
   });
   const formData = new FormData();
   settings.appendUploadSettings(formData, settings.HIGHEST_QUALITY_DEFAULTS);
   assert.equal(formData.get("min_decode_ratio"), "1.0");
   assert.equal(formData.get("create_lerobot"), "true");
-  assert.equal(formData.get("lerobot_fps"), "30");
+  assert.equal(formData.get("lerobot_fps"), "12");
 });
 
 test("upload settings persist and reset to defaults when cache is absent", () => {

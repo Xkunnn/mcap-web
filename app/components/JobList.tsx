@@ -16,6 +16,12 @@ import {
   type LerobotStatus,
   type NormalizedFileResult,
 } from "../lib/jobDisplay";
+import {
+  currentLerobotErrors,
+  getDatasetPreviews,
+  isStereoDataset,
+  latestLerobotResults,
+} from "../lib/lerobotDisplay";
 import type { Job } from "../types";
 import { elapsedTime, formatBytes, formatDate, statusLabel } from "../utils";
 import { AnalysisDashboard } from "./AnalysisDashboard";
@@ -25,24 +31,59 @@ import { VideoGallery } from "./VideoGallery";
 
 type Tab = "analysis" | "video" | "metrics" | "dataset";
 
-function DatasetGallery({ job }: { job: Job }) {
+function DatasetGallery({ job, onLeRobot, generating }: {
+  job: Job;
+  onLeRobot: (id: string) => void;
+  generating: boolean;
+}) {
   const files = normalizeFileResults(job);
-  if (!job.lerobot_results?.length && !job.lerobot_errors?.length && !files.some((file) => file.lerobotStatus === "unsupported")) {
+  const datasets = latestLerobotResults(job.lerobot_results);
+  const errors = currentLerobotErrors(job);
+  if (!datasets.length && !errors.length && !files.some((file) => file.lerobotStatus === "unsupported")) {
     return <div className="empty-inline"><span>◇</span><strong>当前任务尚未生成 LeRobot 数据集</strong><p>点击“生成 LeRobot”创建训练数据集。</p></div>;
   }
   return <div className="dataset-grid">
-    {(job.lerobot_results || []).map((dataset) => <article className="dataset-card" key={dataset.download_url}>
-      <div><span>LR</span><p><strong>{dataset.name}</strong><small>{dataset.robot_type || "LivUMI-Ego-Lite"}</small></p><em>{dataset.version || "v3.0"}</em></div>
-      {dataset.preview_url && <video controls playsInline preload="metadata" src={agentUrl(dataset.preview_url)} />}
-      <dl><div><dt>版本</dt><dd>{dataset.version || "v3.0"}</dd></div><div><dt>FPS</dt><dd>{dataset.fps ?? "—"}</dd></div><div><dt>Episodes</dt><dd>{dataset.episodes ?? 0}</dd></div><div><dt>Frames</dt><dd>{dataset.frames?.toLocaleString("zh-CN") ?? 0}</dd></div><div><dt>完整率</dt><dd>{dataset.completeness_pct?.toFixed(2) ?? "—"}%</dd></div><div><dt>视频大小</dt><dd>{dataset.video_size_mb?.toFixed(2) ?? "—"} MB</dd></div><div><dt>ZIP 大小</dt><dd>{formatBytes(dataset.archive_size)}</dd></div></dl>
-      <div className="card-actions"><a href={agentUrl(dataset.download_url)}>下载 ZIP</a><a href={agentUrl(dataset.info_url)}>查看 info.json</a></div>
-    </article>)}
-    {(job.lerobot_errors || []).map((item) => <LerobotCompatibilityNotice key={`${item.source}-${item.error}`} source={item.source} error={item.error} />)}
+    {datasets.map((dataset, index) => {
+      const previews = getDatasetPreviews(dataset);
+      return <article className="dataset-card" key={`${dataset.source}-${dataset.download_url}-${index}`}>
+        <div><span>LR</span><p><strong>{dataset.name || "LeRobot 数据集"}</strong><small title={dataset.source}>源文件：{dataset.source || "—"}</small></p><em>{isStereoDataset(dataset) ? "双目数据集" : "单目数据集"}</em></div>
+        {previews.length > 0 && <div className="dataset-previews">{previews.map((preview) => (
+          <figure key={`${preview.key}-${preview.preview_url}`}>
+            <figcaption>{preview.label || preview.key || "相机预览"}</figcaption>
+            <video controls playsInline preload="metadata" src={agentUrl(preview.preview_url)} />
+          </figure>
+        ))}</div>}
+        <dl>
+          <div><dt>LeRobot 版本</dt><dd>{dataset.version || "—"}</dd></div>
+          <div><dt>数据集类型</dt><dd>{isStereoDataset(dataset) ? "双目" : "单目"}</dd></div>
+          <div><dt>FPS</dt><dd>{dataset.fps ?? "—"}</dd></div>
+          <div><dt>Episode 数</dt><dd>{dataset.episodes ?? "—"}</dd></div>
+          <div><dt>总帧数</dt><dd>{dataset.frames?.toLocaleString("zh-CN") ?? "—"}</dd></div>
+          <div><dt>视频完整率</dt><dd>{dataset.completeness_pct == null ? "—" : `${dataset.completeness_pct.toFixed(2)}%`}</dd></div>
+          <div><dt>数据文件大小</dt><dd>{dataset.data_size_mb == null ? "—" : `${dataset.data_size_mb.toFixed(2)} MB`}</dd></div>
+          <div><dt>视频文件大小</dt><dd>{dataset.video_size_mb == null ? "—" : `${dataset.video_size_mb.toFixed(2)} MB`}</dd></div>
+          <div><dt>ZIP 大小</dt><dd>{dataset.archive_size == null ? "—" : formatBytes(dataset.archive_size)}</dd></div>
+        </dl>
+        <div className="card-actions">
+          {dataset.download_url && <a href={agentUrl(dataset.download_url)}>下载数据集 ZIP</a>}
+          {dataset.info_url && <a href={agentUrl(dataset.info_url)} target="_blank" rel="noreferrer">查看 info.json</a>}
+        </div>
+      </article>;
+    })}
+    {errors.map((item) => <LerobotCompatibilityNotice
+      key={`${item.source}-${item.error}`}
+      source={item.source}
+      error={item.error}
+      onRetry={() => onLeRobot(job.id)}
+      retryDisabled={generating}
+    />)}
     {files.filter((file) => file.lerobotStatus === "unsupported" && !file.lerobotErrors.length).map((file) => (
       <LerobotCompatibilityNotice
         key={`inferred-${file.name}`}
         source={file.name}
         error="未找到 /ego/camera/0 视频流；LeRobot 导出仅支持 LivUMI Ego 主相机数据"
+        onRetry={() => onLeRobot(job.id)}
+        retryDisabled={generating}
       />
     ))}
   </div>;
@@ -96,8 +137,9 @@ function lerobotSummary(files: NormalizedFileResult[]): string {
   ].filter(Boolean).join(" · ");
 }
 
-function JobCard({ job, expanded, onToggle, onDelete, onAnalyze, onLeRobot, onRetry }: {
+function JobCard({ job, expanded, generating, onToggle, onDelete, onAnalyze, onLeRobot, onRetry }: {
   job: Job; expanded: boolean; onToggle: () => void;
+  generating: boolean;
   onDelete: (id: string) => void; onAnalyze: (id: string) => void; onLeRobot: (id: string) => void; onRetry: (id: string) => void;
 }) {
   const [tab, setTab] = useState<Tab>("analysis");
@@ -127,10 +169,10 @@ function JobCard({ job, expanded, onToggle, onDelete, onAnalyze, onLeRobot, onRe
       <div className="job-actions">
         <button disabled={busy || !job.files.length} onClick={() => onAnalyze(job.id)}>运行分析</button>
         <button
-          disabled={busy || !job.files.length || lerobotUnsupported}
+          disabled={busy || generating || !job.files.length || lerobotUnsupported}
           title={lerobotUnsupported ? "未检测到 LivUMI Ego 主相机视频流 /ego/camera/0" : undefined}
           onClick={() => onLeRobot(job.id)}
-        >{lerobotUnsupported ? "不支持 LeRobot" : "生成 LeRobot"}</button>
+        >{lerobotUnsupported ? "不支持 LeRobot" : generating ? "正在生成…" : "生成 LeRobot"}</button>
         <button disabled={busy || displayStatus !== "failed"} onClick={() => onRetry(job.id)}>重试</button>
         <button className="result-toggle" onClick={onToggle}>{expanded ? "收起结果" : "查看结果"}</button>
         <button disabled={busy} className="danger" onClick={() => onDelete(job.id)}>删除</button>
@@ -157,14 +199,15 @@ function JobCard({ job, expanded, onToggle, onDelete, onAnalyze, onLeRobot, onRe
         {tab === "analysis" && (analysisResults.length ? <AnalysisDashboard results={analysisResults} /> : <div className="failure-details"><strong>{displayStatus === "failed" ? "任务未生成可展示的分析结果" : "等待分析结果"}</strong>{failures.map((message, index) => <p key={`${message}-${index}`}>{message}</p>)}</div>)}
         {tab === "video" && <VideoGallery results={videoResults} />}
         {tab === "metrics" && <DetailedMetrics results={job.results} />}
-        {tab === "dataset" && <DatasetGallery job={job} />}
+        {tab === "dataset" && <DatasetGallery job={job} onLeRobot={onLeRobot} generating={generating} />}
       </div>
     </>)}
   </article>;
 }
 
-export function JobList({ jobs, connected, onDelete, onAnalyze, onLeRobot, onRetry }: {
+export function JobList({ jobs, connected, generatingIds, onDelete, onAnalyze, onLeRobot, onRetry }: {
   jobs: Job[]; connected: boolean | null;
+  generatingIds: ReadonlySet<string>;
   onDelete: (id: string) => void; onAnalyze: (id: string) => void; onLeRobot: (id: string) => void;
   onRetry: (id: string) => void;
 }) {
@@ -182,6 +225,7 @@ export function JobList({ jobs, connected, onDelete, onAnalyze, onLeRobot, onRet
       : <div className="job-list">{connected === false && <div className="stale-data-notice">Agent 暂时离线，以下为上次成功读取的数据，不代表实时状态。</div>}{visibleJobs.map((job) => <JobCard
         key={job.id}
         job={job}
+        generating={generatingIds.has(job.id)}
         expanded={expandedId === job.id}
         onToggle={() => setExpandedId((current) => current === job.id ? null : job.id)}
         onDelete={onDelete}

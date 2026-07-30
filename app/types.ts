@@ -88,6 +88,11 @@ export type LeRobotResult = {
   download_url: string;
   info_url: string;
   preview_url?: string;
+  camera_previews?: {
+    key?: string;
+    label?: string;
+    preview_url: string;
+  }[];
 };
 
 export type Job = {
@@ -105,8 +110,8 @@ export type Job = {
   create_lerobot?: boolean;
   lerobot_fps?: number;
   results: ResultItem[];
-  lerobot_results?: LeRobotResult[];
-  lerobot_errors?: { source: string; error: string }[];
+  lerobot_results: LeRobotResult[];
+  lerobot_errors: { source: string; error: string }[];
   succeeded_count: number;
   failed_count: number;
   return_code?: number;
